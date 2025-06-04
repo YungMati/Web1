@@ -22,44 +22,21 @@ const USERS = {
 
 const MESSAGE_FILE = path.join(__dirname, 'messages.json');
 let messages = [];
-const onlineUsers = new Set();
-const clients = new Map(); // Mapowanie: ws => nazwa użytkownika
 
 // Wczytaj poprzednie wiadomości
 try {
   if (fs.existsSync(MESSAGE_FILE)) {
     const raw = fs.readFileSync(MESSAGE_FILE);
     messages = JSON.parse(raw);
-    if (messages.length > 20) {
-      messages = messages.slice(-20);
-    }
   }
 } catch (err) {
   console.error('Nie można wczytać wiadomości:', err);
 }
 
-// Funkcja do broadcastu
-function broadcast(data) {
-  const msg = JSON.stringify(data);
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msg);
-    }
-  });
-}
-
-// Funkcja do aktualizacji listy online
-function updateOnlineUsers() {
-  broadcast({
-    type: 'online_users',
-    users: Array.from(onlineUsers),
-  });
-}
-
 wss.on('connection', (ws) => {
   let loggedInUser = null;
 
-  // Wyślij historię wiadomości
+  // Wyślij wszystkie zapisane wiadomości po połączeniu
   ws.send(JSON.stringify({ type: 'history', messages }));
 
   ws.on('message', (message) => {
@@ -82,10 +59,7 @@ wss.on('connection', (ws) => {
       case 'login':
         if (USERS[data.username] === data.password) {
           loggedInUser = data.username;
-          clients.set(ws, loggedInUser);
-          onlineUsers.add(loggedInUser);
           ws.send(JSON.stringify({ type: 'login', status: 'ok' }));
-          updateOnlineUsers();
         } else {
           ws.send(JSON.stringify({ type: 'login', status: 'fail' }));
         }
@@ -93,28 +67,32 @@ wss.on('connection', (ws) => {
 
       case 'message':
         if (!loggedInUser) return;
+
         const msg = {
           username: loggedInUser,
-          text: data.text,
           time: new Date().toLocaleTimeString(),
         };
-        messages.push(msg);
-        if (messages.length > 20) {
-          messages = messages.slice(-20);
+
+        if (typeof data.text === 'string' && data.text.trim() !== '') {
+          msg.text = data.text.trim();
+        } else if (typeof data.image === 'string' && data.image.startsWith('data:image/')) {
+          msg.image = data.image;
+        } else {
+          return;
         }
 
-        fs.writeFile(MESSAGE_FILE, JSON.stringify(messages, null, 2), () => {});
-        broadcast({ type: 'message', ...msg });
-        break;
-    }
-  });
+        messages.push(msg);
 
-  ws.on('close', () => {
-    const user = clients.get(ws);
-    if (user) {
-      onlineUsers.delete(user);
-      clients.delete(ws);
-      updateOnlineUsers();
+        // Zapisz wiadomości do pliku
+        fs.writeFile(MESSAGE_FILE, JSON.stringify(messages, null, 2), () => {});
+
+        // Wyślij do wszystkich klientów
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'message', ...msg }));
+          }
+        });
+        break;
     }
   });
 });
