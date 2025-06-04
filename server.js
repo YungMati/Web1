@@ -23,11 +23,14 @@ const USERS = {
 const MESSAGE_FILE = path.join(__dirname, 'messages.json');
 let messages = [];
 
-// Wczytaj poprzednie wiadomości
+// Wczytaj poprzednie wiadomości (tylko 20 ostatnich)
 try {
   if (fs.existsSync(MESSAGE_FILE)) {
     const raw = fs.readFileSync(MESSAGE_FILE);
     messages = JSON.parse(raw);
+    if (messages.length > 20) {
+      messages = messages.slice(-20);
+    }
   }
 } catch (err) {
   console.error('Nie można wczytać wiadomości:', err);
@@ -36,8 +39,8 @@ try {
 wss.on('connection', (ws) => {
   let loggedInUser = null;
 
-  // Wyślij wszystkie zapisane wiadomości po połączeniu
-  ws.send(JSON.stringify({ type: 'history', messages }));
+  // Wyślij ostatnie 20 wiadomości po połączeniu
+  ws.send(JSON.stringify({ type: 'history', messages: messages.slice(-20) }));
 
   ws.on('message', (message) => {
     let data;
@@ -67,26 +70,19 @@ wss.on('connection', (ws) => {
 
       case 'message':
         if (!loggedInUser) return;
-
         const msg = {
           username: loggedInUser,
+          text: data.text,
           time: new Date().toLocaleTimeString(),
         };
 
-        if (typeof data.text === 'string' && data.text.trim() !== '') {
-          msg.text = data.text.trim();
-        } else if (typeof data.image === 'string' && data.image.startsWith('data:image/')) {
-          msg.image = data.image;
-        } else {
-          return;
+        messages.push(msg);
+        if (messages.length > 20) {
+          messages = messages.slice(-20);
         }
 
-        messages.push(msg);
-
-        // Zapisz wiadomości do pliku
         fs.writeFile(MESSAGE_FILE, JSON.stringify(messages, null, 2), () => {});
 
-        // Wyślij do wszystkich klientów
         wss.clients.forEach((client) => {
           if (client.readyState === WebSocket.OPEN) {
             client.send(JSON.stringify({ type: 'message', ...msg }));
