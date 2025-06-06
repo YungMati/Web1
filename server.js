@@ -18,6 +18,9 @@ const ACCESS_CODE = 'ZAQ!2wsx';
 const USERS = {
   yung: '1234',
   czarny: '1234',
+  bialy:   '1234',
+  sigma:   '1234',
+  admin:  '4321',
 };
 
 const MESSAGE_FILE = path.join(__dirname, 'messages.json');
